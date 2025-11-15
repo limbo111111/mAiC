@@ -1,0 +1,394 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Multi-AI Chat mit Puter.js</title>
+    <style>
+        body { font-family: Arial, sans-serif; max-width: 1200px; margin: 0 auto; padding: 20px; font-size: 16px; line-height: 1.4; }
+        #search { display: flex; gap: 10px; margin-bottom: 20px; align-items: center; flex-wrap: wrap; }
+        #search input { flex: 1; padding: 10px; font-size: 16px; min-width: 200px; box-sizing: border-box; }
+        #search button { padding: 10px 20px; color: white; border: none; cursor: pointer; font-size: 14px; white-space: nowrap; }
+        #ask-btn { background: #007bff; }
+        #select-ai-btn { background: #28a745; }
+        #compare-section { margin: 20px 0; display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+        #compare-btn, #export-btn { padding: 10px 20px; border: none; cursor: pointer; font-size: 14px; }
+        #compare-btn { background: #ffc107; color: #000; }
+        #export-btn { background: #17a2b8; color: white; }
+        #results { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 20px; }
+        .ai-card { border: 1px solid #ddd; padding: 15px; border-radius: 8px; background: #f9f9f9; position: relative; box-sizing: border-box; }
+        .ai-card h3 { margin-top: 0; color: #007bff; display: flex; justify-content: space-between; align-items: center; font-size: 1em; flex-wrap: wrap; }
+        .stop-btn { background: #dc3545; color: white; border: none; padding: 5px 10px; border-radius: 4px; cursor: pointer; font-size: 0.8em; display: none; }
+        .stream-content { min-height: 100px; border: 1px dashed #ccc; padding: 10px; white-space: pre-wrap; font-size: 0.9em; overflow-y: auto; max-height: 300px; }
+        .typing-indicator { color: #666; font-style: italic; animation: pulse 1.5s infinite; }
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+        .typing-dots::after { content: '...'; animation: dots 1.5s steps(4, end) infinite; }
+        @keyframes dots { 0%, 20% { content: '.'; } 40% { content: '..'; } 60% { content: '...'; } 80%, 100% { content: ''; } }
+        .error { color: red; }
+        .aborted { color: orange; font-style: italic; }
+        .compare-card { background: #e7f3ff; border: 2px solid #007bff; margin-bottom: 20px; padding: 20px; border-radius: 8px; font-size: 0.9em; }
+        .best-highlight { background: #d4edda; padding: 10px; border-left: 4px solid #28a745; margin: 10px 0; }
+
+        /* Modal Styles */
+        .modal { display: none; position: fixed; z-index: 1000; left: 0; top: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); }
+        .modal-content { background: white; margin: 10% auto; padding: 20px; border-radius: 8px; width: 90%; max-width: 500px; max-height: 70vh; overflow-y: auto; box-sizing: border-box; }
+        .close { color: #aaa; float: right; font-size: 28px; font-weight: bold; cursor: pointer; }
+        .close:hover { color: black; }
+        .ai-list { list-style: none; padding: 0; }
+        .ai-item { display: flex; align-items: center; padding: 10px; border-bottom: 1px solid #eee; font-size: 0.9em; }
+        .ai-item input[type="checkbox"] { margin-right: 10px; }
+        .ai-item label { flex: 1; cursor: pointer; }
+        .provider { font-size: 0.8em; color: #666; }
+        .save-btn { background: #28a745; color: white; padding: 10px 20px; border: none; cursor: pointer; margin-top: 10px; width: 100%; }
+        .warning { color: orange; font-size: 0.9em; display: none; }
+
+        /* Mobile Responsivität – alle Verbesserungen integriert */
+        @media (max-width: 600px) {
+            body { padding: 10px; font-size: 14px; }
+            #search { flex-direction: column; align-items: stretch; }
+            #search input { min-width: auto; margin-bottom: 10px; }
+            #search button { width: 100%; }
+            #compare-section { flex-direction: column; align-items: stretch; }
+            #compare-btn, #export-btn { width: 100%; margin-bottom: 10px; }
+            #results { grid-template-columns: 1fr; gap: 15px; }
+            .ai-card { padding: 12px; }
+            .ai-card h3 { font-size: 1.1em; gap: 10px; }
+            .stop-btn { padding: 6px 12px; font-size: 0.9em; }
+            .stream-content { min-height: 80px; max-height: 250px; font-size: 14px; padding: 8px; }
+            .modal-content { margin: 5% auto; width: 95%; padding: 15px; max-height: 80vh; }
+            .ai-item { padding: 8px; font-size: 14px; flex-wrap: wrap; }
+            .ai-item label { font-size: 13px; }
+            .save-btn { padding: 12px; font-size: 16px; }
+            .compare-card { padding: 15px; font-size: 14px; }
+        }
+
+        @media (max-width: 400px) {
+            body { padding: 5px; font-size: 13px; }
+            #search button { padding: 8px 15px; font-size: 12px; }
+            .ai-card { padding: 10px; }
+            .stream-content { max-height: 200px; }
+            .close { font-size: 24px; }
+        }
+
+        /* Zusätzliche Touch-Optimierungen */
+        button, input[type="checkbox"] { touch-action: manipulation; }
+        .ai-card h3 { gap: 5px; }
+    </style>
+</head>
+<body>
+    <h1>Multi-AI Suchmaschine (mit Streaming, Typing & Export)</h1>
+    <div id="search">
+        <input type="text" id="question" placeholder="Deine Frage eingeben... (z.B. 'Erzähle eine lange Geschichte')" />
+        <button id="ask-btn" onclick="askAIs()">Frage stellen</button>
+        <button id="select-ai-btn" onclick="openSelectModal()">AI-Modelle auswählen (Top 50)</button>
+    </div>
+    <div id="compare-section" style="display: none;">
+        <button id="compare-btn" onclick="openCompareModal()">Antworten vergleichen lassen</button>
+        <button id="export-btn" onclick="exportResponses()">Antworten exportieren (Markdown)</button>
+        <div id="compare-results"></div>
+    </div>
+    <div id="results"></div>
+
+    <!-- Modal für AI-Auswahl -->
+    <div id="selectModal" class="modal">
+        <div class="modal-content">
+            <span class="close" onclick="closeSelectModal()">&times;</span>
+            <h2>Top 50 AI-Modelle auswählen (max. 5)</h2>
+            <ul class="ai-list" id="aiList"></ul>
+            <p class="warning" id="select-warning">Maximal 5 Modelle erlaubt!</p>
+            <button class="save-btn" onclick="saveSelection()">Auswahl speichern</button>
+        </div>
+    </div>
+
+    <!-- Modal für Vergleichs-AI-Auswahl -->
+    <div id="compareModal" class="modal">
+        <div class="modal-content">
+            <span class="close" onclick="closeCompareModal()">&times;</span>
+            <h2>Vergleichs-AI auswählen (nur 1)</h2>
+            <ul class="ai-list" id="compareList"></ul>
+            <p class="warning" id="compare-warning">Nur eine AI erlaubt!</p>
+            <button class="save-btn" onclick="performComparison()">Vergleich starten</button>
+        </div>
+    </div>
+
+    <script src="https://js.puter.com/v2/"></script>
+    <script>
+        // Globale Variablen
+        let selectedAIs = [
+            { name: 'GPT-5', model: 'gpt-5' },
+            { name: 'Claude 4.1', model: 'claude-4.1' },
+            { name: 'Grok 5', model: 'grok-5' },
+            { name: 'Gemini 2.5 Pro', model: 'gemini-2.5-pro' }
+        ];
+        let currentResponses = []; // Speichert finale Antworten
+        let currentQuestion = '';
+        let abortControllers = []; // Für Stop-Buttons
+
+        // Vollständige Top 50 Liste
+        const allAIs = [
+            // OpenAI (12)
+            { name: 'GPT-5', model: 'gpt-5', provider: 'OpenAI' },
+            { name: 'GPT-o4-mini', model: 'gpt-o4-mini', provider: 'OpenAI' },
+            { name: 'GPT-o3', model: 'gpt-o3', provider: 'OpenAI' },
+            { name: 'GPT-4.1', model: 'gpt-4.1', provider: 'OpenAI' },
+            { name: 'GPT-4.5', model: 'gpt-4.5', provider: 'OpenAI' },
+            { name: 'GPT-o3-mini', model: 'gpt-o3-mini', provider: 'OpenAI' },
+            { name: 'Sora', model: 'sora', provider: 'OpenAI' },
+            { name: 'GPT-o1', model: 'gpt-o1', provider: 'OpenAI' },
+            { name: 'GPT-4o mini', model: 'gpt-4o-mini', provider: 'OpenAI' },
+            { name: 'GPT-4o', model: 'gpt-4o', provider: 'OpenAI' },
+            { name: 'GPT 5.1', model: 'gpt-5.1', provider: 'OpenAI' },
+            { name: 'GPT-5', model: 'gpt-5', provider: 'OpenAI' },
+
+            // Anthropic (6)
+            { name: 'Claude 4.1', model: 'claude-4.1', provider: 'Anthropic' },
+            { name: 'Claude 3.7 Sonnet', model: 'claude-3.7-sonnet', provider: 'Anthropic' },
+            { name: 'Claude 3.5 Sonnet (New)', model: 'claude-3.5-sonnet-new', provider: 'Anthropic' },
+            { name: 'Claude 3.5 Sonnet', model: 'claude-3.5-sonnet', provider: 'Anthropic' },
+            { name: 'Claude Opus 4.1', model: 'claude-opus-4.1', provider: 'Anthropic' },
+            { name: 'Claude Haiku 4.5', model: 'claude-haiku-4.5', provider: 'Anthropic' },
+
+            // xAI (4)
+            { name: 'Grok 5', model: 'grok-5', provider: 'xAI' },
+            { name: 'Grok-3', model: 'grok-3', provider: 'xAI' },
+            { name: 'Grok-2', model: 'grok-2', provider: 'xAI' },
+            { name: 'Grok 4', model: 'grok-4', provider: 'xAI' },
+
+            // Google DeepMind (7)
+            { name: 'Gemini 2.5 Pro', model: 'gemini-2.5-pro', provider: 'Google DeepMind' },
+            { name: 'Gemini 2.0 Flash-Lite', model: 'gemini-2.0-flash-lite', provider: 'Google DeepMind' },
+            { name: 'Gemini 2.0 Pro', model: 'gemini-2.0-pro', provider: 'Google DeepMind' },
+            { name: 'Gemini 2.0 Flash', model: 'gemini-2.0-flash', provider: 'Google DeepMind' },
+            { name: 'Gemini 1.5', model: 'gemini-1.5', provider: 'Google DeepMind' },
+            { name: 'Gemma', model: 'gemma', provider: 'Google DeepMind' },
+            { name: 'PaLM 2', model: 'palm-2', provider: 'Google' },
+
+            // Meta AI (3)
+            { name: 'Llama 4 Scout', model: 'llama-4-scout', provider: 'Meta AI' },
+            { name: 'Llama 3.1', model: 'llama-3.1', provider: 'Meta AI' },
+            { name: 'Llama 3.1 405b', model: 'llama-3.1-405b', provider: 'Meta' },
+
+            // Alibaba (2)
+            { name: 'Qwen 3', model: 'qwen-3', provider: 'Alibaba' },
+            { name: 'Qwen 2.5-Max', model: 'qwen-2.5-max', provider: 'Alibaba' },
+
+            // DeepSeek (4)
+            { name: 'DeepSeek R1', model: 'deepseek-r1', provider: 'DeepSeek' },
+            { name: 'DeepSeek-V3', model: 'deepseek-v3', provider: 'DeepSeek' },
+            { name: 'DeepSeek-V2.5', model: 'deepseek-v2.5', provider: 'DeepSeek' },
+            { name: 'DeepSeek-V2', model: 'deepseek-v2', provider: 'DeepSeek' },
+
+            // Mistral AI (2)
+            { name: 'Mistral Large 2', model: 'mistral-large-2', provider: 'Mistral AI' },
+            { name: 'Mixtral 8x22B', model: 'mixtral-8x22b', provider: 'Mistral AI' },
+
+            // Microsoft (1)
+            { name: 'Phi-3', model: 'phi-3', provider: 'Microsoft' },
+
+            // Nvidia (1)
+            { name: 'Nemotron-4', model: 'nemotron-4', provider: 'Nvidia' },
+
+            // AI21 Labs (1)
+            { name: 'Jamba', model: 'jamba', provider: 'AI21 Labs' },
+
+            // Databricks (1)
+            { name: 'DBRX', model: 'dbrx', provider: 'Databricks' },
+
+            // Cohere (1)
+            { name: 'Command R', model: 'command-r', provider: 'Cohere' },
+
+            // Inflection AI (1)
+            { name: 'Inflection-2.5', model: 'inflection-2.5', provider: 'Inflection AI' },
+
+            // Stability AI (1)
+            { name: 'Stable LM 2', model: 'stable-lm-2', provider: 'Stability AI' },
+
+            // Technology Innovation Institute (1)
+            { name: 'Falcon 180B', model: 'falcon-180b', provider: 'TII' },
+
+            // Salesforce (1)
+            { name: 'XGen-7B', model: 'xgen-7b', provider: 'Salesforce' },
+
+            // Stanford CRFM (1)
+            { name: 'Alpaca 7B', model: 'alpaca-7b', provider: 'Stanford CRFM' },
+
+            // EleutherAI (1)
+            { name: 'Pythia', model: 'pythia', provider: 'EleutherAI' },
+
+            // Mistral AI (extra)
+            { name: 'Mistral 7B', model: 'mistral-7b', provider: 'Mistral AI' },
+
+            // Amazon (1)
+            { name: 'Nova', model: 'nova', provider: 'Amazon' },
+
+            // Moonshot AI (1)
+            { name: 'Kimi K2 Thinking', model: 'kimi-k2-thinking', provider: 'Moonshot AI' },
+
+            // Nova AI (1)
+            { name: 'Nova Pro', model: 'nova-pro', provider: 'Nova AI' },
+
+            // NVIDIA (extra)
+            { name: 'Nemotron Ultra 253B', model: 'nemotron-ultra-253b', provider: 'NVIDIA' },
+
+            // Meta (extra)
+            { name: 'Llama 3.3 70b', model: 'llama-3.3-70b', provider: 'Meta' }
+        ].slice(0, 50);
+
+        // Modal-Funktionen (unverändert)
+        function openSelectModal() {
+            const modal = document.getElementById('selectModal');
+            const list = document.getElementById('aiList');
+            list.innerHTML = '';
+            allAIs.forEach(ai => {
+                const li = document.createElement('li');
+                li.className = 'ai-item';
+                li.innerHTML = `
+                    <input type="checkbox" id="${ai.model}" value="${ai.model}" ${selectedAIs.some(s => s.model === ai.model) ? 'checked' : ''} onchange="validateSelection('select')">
+                    <label for="${ai.model}">${ai.name} <span class="provider">(${ai.provider})</span></label>
+                `;
+                list.appendChild(li);
+            });
+            document.getElementById('select-warning').style.display = 'none';
+            modal.style.display = 'block';
+        }
+
+        function closeSelectModal() {
+            document.getElementById('selectModal').style.display = 'none';
+        }
+
+        function openCompareModal() {
+            if (currentResponses.length === 0) return alert('Zuerst eine Frage stellen!');
+            const modal = document.getElementById('compareModal');
+            const list = document.getElementById('compareList');
+            list.innerHTML = '';
+            allAIs.forEach(ai => {
+                const li = document.createElement('li');
+                li.className = 'ai-item';
+                li.innerHTML = `
+                    <input type="checkbox" id="comp-${ai.model}" value="${ai.model}" onchange="validateSelection('compare')">
+                    <label for="comp-${ai.model}">${ai.name} <span class="provider">(${ai.provider})</span></label>
+                `;
+                list.appendChild(li);
+            });
+            document.getElementById('compare-warning').style.display = 'none';
+            modal.style.display = 'block';
+        }
+
+        function closeCompareModal() {
+            document.getElementById('compareModal').style.display = 'none';
+        }
+
+        function validateSelection(type) {
+            const listId = type === 'select' ? '#aiList' : '#compareList';
+            const warningId = type === 'select' ? '#select-warning' : '#compare-warning';
+            const checked = document.querySelectorAll(listId + ' input:checked');
+            const max = type === 'select' ? 5 : 1;
+            if (checked.length > max) {
+                document.querySelector(warningId).style.display = 'block';
+                while (checked.length > max) {
+                    checked[checked.length - 1].checked = false;
+                }
+            } else {
+                document.querySelector(warningId).style.display = 'none';
+            }
+        }
+
+        function saveSelection() {
+            const checkedBoxes = document.querySelectorAll('#aiList input:checked');
+            selectedAIs = Array.from(checkedBoxes).map(cb => {
+                const label = cb.nextElementSibling.textContent;
+                const name = label.replace(/ \(\w+\)/, '').trim();
+                return { name, model: cb.value };
+            }).slice(0, 5);
+            closeSelectModal();
+            alert(`Auswahl gespeichert: ${selectedAIs.length} Modelle aktiv.`);
+        }
+
+        // Streaming-Funktion mit Abort und Typing
+        async function streamAIResponse(ai, index, abortController) {
+            const container = document.getElementById(`content-${index}`);
+            const stopBtn = document.getElementById(`stop-${index}`);
+            let fullResult = '';
+            let isAborted = false;
+
+            // Typing-Indikator anzeigen
+            container.innerHTML = '<span class="typing-indicator typing-dots">tippt<span class="typing-dots"></span></span>';
+            stopBtn.style.display = 'inline-block';
+
+            try {
+                const stream = await puter.ai.chat(currentQuestion, { model: ai.model, stream: true, signal: abortController.signal });
+                for await (const chunk of stream) {
+                    if (abortController.signal.aborted) {
+                        isAborted = true;
+                        break;
+                    }
+                    fullResult += chunk;
+                    container.innerHTML = fullResult.replace(/\n/g, '<br>');
+                }
+                if (!isAborted) {
+                    // Typing entfernen
+                    stopBtn.style.display = 'none';
+                } else {
+                    container.innerHTML = '<span class="aborted">Abgebrochen</span>';
+                    fullResult = 'Abgebrochen';
+                }
+            } catch (error) {
+                if (error.name === 'AbortError') {
+                    container.innerHTML = '<span class="aborted">Abgebrochen</span>';
+                    fullResult = 'Abgebrochen';
+                } else {
+                    container.innerHTML = `<p class="error">Fehler: ${error.message}</p>`;
+                    fullResult = `Fehler: ${error.message}`;
+                }
+                stopBtn.style.display = 'none';
+            }
+            return fullResult;
+        }
+
+        // Stop-Funktion pro Karte
+        function stopStream(index) {
+            const controller = abortControllers[index];
+            if (controller) {
+                controller.abort();
+            }
+        }
+
+        // Hauptfunktion: Parallele Streams
+        async function askAIs() {
+            currentQuestion = document.getElementById('question').value.trim();
+            if (!currentQuestion) return alert('Bitte eine Frage eingeben!');
+            if (selectedAIs.length === 0) return alert('Bitte mindestens ein AI-Modell auswählen!');
+
+            const resultsDiv = document.getElementById('results');
+            resultsDiv.innerHTML = '';
+            currentResponses = [];
+            abortControllers = []; // Reset
+
+            const promises = selectedAIs.map((ai, index) => {
+                const controller = new AbortController();
+                abortControllers.push(controller);
+
+                const card = document.createElement('div');
+                card.className = 'ai-card';
+                card.id = `card-${index}`;
+                card.innerHTML = `
+                    <h3>${ai.name} <button id="stop-${index}" class="stop-btn" onclick="stopStream(${index})">Stop</button></h3>
+                    <div class="stream-content" id="content-${index}"></div>
+                `;
+                resultsDiv.appendChild(card);
+
+                return streamAIResponse(ai, index, controller).then(result => {
+                    currentResponses.push({ ...ai, result });
+                });
+            });
+
+            await Promise.all(promises.filter(p => p)); // Ignoriere abgebrochene
+
+            // Buttons anzeigen
+            document.getElementById('compare-section').style.display = 'block';
+        }
+
+        // Export als Markdown (inkl. Frage, Antworten, Vergleich)
+        function exportResponses() {
+            if (currentResponses.length === 0) return alert('Keine Antworten zum Exportieren!');
+            
